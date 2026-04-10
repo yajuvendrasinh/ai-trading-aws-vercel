@@ -2,10 +2,11 @@ import { NextResponse } from "next/server"
 
 export async function GET(
   request: Request,
-  { params }: { params: { jobId: string } }
+  { params }: { params: Promise<{ jobId: string }> }
 ) {
-  const { jobId } = params
+  const { jobId } = await params
   const awsUrl = `${process.env.NEXT_PUBLIC_AWS_IP}/data/download/${jobId}`
+
 
   try {
     const res = await fetch(awsUrl, {
