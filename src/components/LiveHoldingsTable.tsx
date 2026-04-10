@@ -22,54 +22,87 @@ export function LiveHoldingsTable({ initialHoldings }: LiveHoldingsTableProps) {
   useEffect(() => {
     // Determine WebSocket URL from base HTTP URL
     const rawBase = process.env.NEXT_PUBLIC_AWS_IP || "http://localhost:8000"
-    const baseIP = rawBase.replace(/\/$/, '') // Remove trailing slash
+    const baseIP = rawBase.replace(/\/$/, '') 
     const wsBase = baseIP.replace(/^http/, 'ws')
     const wsUrl = `${wsBase}/ws/live-prices`
 
     let socket: WebSocket | null = null
     let reconnectInterval: NodeJS.Timeout
+    let pollingInterval: NodeJS.Timeout
+
+    const startPolling = () => {
+      console.log("[LiveHoldings] 🔄 Falling back to Smart Polling (Mixed Content or WS Failure).")
+      if (pollingInterval) clearInterval(pollingInterval)
+      pollingInterval = setInterval(async () => {
+        try {
+          // Import dynamic to avoid build issues
+          const { fetchBreezeData } = await import("@/app/actions")
+          const data = await fetchBreezeData('/portfolio/holdings')
+          if (data && data.Success) {
+            const list = Array.isArray(data.Success) ? data.Success : [data.Success]
+            setHoldings(list.map((h: any) => ({
+                symbol: h.stock_code || h.symbol || h.stockCode,
+                qty: h.quantity || h.holding_quantity || h.qty,
+                price: h.current_market_price || h.last_traded_price || h.ltp,
+                invested: h.average_price || h.avg_price
+            })))
+          }
+        } catch (e) {
+          console.error("[LiveHoldings] Polling error:", e)
+        }
+      }, 7000) // Poll every 7s as a safe fallback
+    }
 
     const connect = () => {
-      console.log(`[LiveDashboard] Connecting to WebSocket: ${wsUrl}`)
-      socket = new WebSocket(wsUrl)
-
-      socket.onopen = () => {
-        console.log("[LiveDashboard] ✅ WebSocket Connected Successfully.")
-        setStatus('connected')
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          // console.log("[LiveDashboard] 📥 Message Received:", message)
-          
-          if (message.type === "TICK") {
-            const { stock_code, price } = message
-            setHoldings(prev => prev.map(h => 
-              h.symbol === stock_code ? { ...h, price } : h
-            ))
-          } else if (message.type === "INIT_PRICES") {
-            console.log("[LiveDashboard] 📊 Initial Prices received.")
-            const initPrices = message.data
-            setHoldings(prev => prev.map(h => 
-              initPrices[h.symbol] ? { ...h, price: initPrices[h.symbol] } : h
-            ))
-          }
-        } catch (err) {
-          console.error("[LiveDashboard] ❌ Failed to parse message:", err)
-        }
-      }
-
-      socket.onclose = (e) => {
-        // Prevent reconnect loops if unmounted
-        if (socket?.readyState !== WebSocket.CLOSED) return
+      // Logic for Mixed Content Detection
+      if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
+        console.warn("[LiveHoldings] ⚠️ Insecure WebSocket blocked by HTTPS protocol. Initiating fallback.")
         setStatus('disconnected')
-        reconnectInterval = setTimeout(connect, 5000) // Slower retry
+        startPolling()
+        return
       }
 
-      socket.onerror = (error) => {
-        // Silence raw errors because .onclose handles the reconnect logic.
-        // Prevent console spam if backend is offline.
+      console.log(`[LiveDashboard] Connecting to WebSocket: ${wsUrl}`)
+      try {
+        socket = new WebSocket(wsUrl)
+        
+        socket.onopen = () => {
+          console.log("[LiveDashboard] ✅ WebSocket Connected Successfully.")
+          setStatus('connected')
+          if (pollingInterval) clearInterval(pollingInterval)
+        }
+
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            if (message.type === "TICK") {
+              const { stock_code, price } = message
+              setHoldings(prev => prev.map(h => 
+                h.symbol === stock_code ? { ...h, price } : h
+              ))
+            } else if (message.type === "INIT_PRICES") {
+              const initPrices = message.data
+              setHoldings(prev => prev.map(h => 
+                initPrices[h.symbol] ? { ...h, price: initPrices[h.symbol] } : h
+              ))
+            }
+          } catch (err) {}
+        }
+
+        socket.onclose = () => {
+          if (socket?.readyState !== WebSocket.CLOSED) return
+          setStatus('disconnected')
+          reconnectInterval = setTimeout(connect, 5000)
+          startPolling() // Start polling while trying to reconnect
+        }
+
+        socket.onerror = (error) => {
+          console.error("[LiveHoldings] WS Error:", error)
+          startPolling()
+        }
+      } catch (e) {
+        console.error("[LiveHoldings] Connection setup failed:", e)
+        startPolling()
       }
     }
 
@@ -77,7 +110,8 @@ export function LiveHoldingsTable({ initialHoldings }: LiveHoldingsTableProps) {
 
     return () => {
       socket?.close()
-      clearTimeout(reconnectInterval)
+      if (reconnectInterval) clearTimeout(reconnectInterval)
+      if (pollingInterval) clearInterval(pollingInterval)
     }
   }, [])
 

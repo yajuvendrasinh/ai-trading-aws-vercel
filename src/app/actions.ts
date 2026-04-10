@@ -2,12 +2,27 @@
 
 import { revalidatePath } from "next/cache"
 
+async function fetchWithTimeout(url: string, options: any = {}, timeout = 6000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export async function updateBreezeSession(token: string) {
   try {
     const encodedToken = encodeURIComponent(token.trim())
+    const url = `${process.env.NEXT_PUBLIC_AWS_IP}/session/update?session_token=${encodedToken}`;
     console.log(`[SessionUpdate] Sending token (prefix: ${token.slice(0, 5)}...) to backend...`)
     
-    const res = await fetch(`${process.env.NEXT_PUBLIC_AWS_IP}/session/update?session_token=${encodedToken}`, {
+    const res = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 
         'X-API-Key': process.env.API_SECRET_KEY as string 
@@ -30,8 +45,9 @@ export async function updateBreezeSession(token: string) {
 }
 
 export async function getBreezeLoginUrl() {
+  const url = `${process.env.NEXT_PUBLIC_AWS_IP}/session/login-url`;
   try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_AWS_IP}/session/login-url`, {
+    const res = await fetchWithTimeout(url, {
       headers: { 
         'X-API-Key': process.env.API_SECRET_KEY as string 
       }
@@ -53,7 +69,7 @@ export async function fetchBreezeData(endpoint: string) {
   
   try {
     console.log(`[FetchBreeze] Requesting: ${url}`);
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: { 'X-API-Key': process.env.API_SECRET_KEY as string },
       next: { revalidate: 5 } // Fast revalidation for trading
     })
@@ -97,10 +113,9 @@ export async function deepCheckSession(): Promise<{ active: boolean; reason: str
   }
 }
 
-export async function downloadHistoricalData(params: any) {
   const url = `${process.env.NEXT_PUBLIC_AWS_IP}/data/historical`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method: "POST",
       headers: {
         "X-API-Key": process.env.API_SECRET_KEY as string,
@@ -124,7 +139,7 @@ export async function downloadHistoricalData(params: any) {
 export async function searchSymbols(query: string, exchange: string) {
   const url = `${process.env.NEXT_PUBLIC_AWS_IP}/data/symbols?query=${encodeURIComponent(query)}&exchange=${exchange}`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: {
         "X-API-Key": process.env.API_SECRET_KEY as string,
       }
@@ -141,7 +156,7 @@ export async function searchSymbols(query: string, exchange: string) {
 export async function getHistoricalJobStatus(jobId: string) {
   const url = `${process.env.NEXT_PUBLIC_AWS_IP}/data/status/${jobId}`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: {
         "X-API-Key": process.env.API_SECRET_KEY as string,
       },
@@ -159,7 +174,7 @@ export async function getHistoricalJobStatus(jobId: string) {
 export async function postTradingCommand(endpoint: string, params: any = {}) {
   const url = `${process.env.NEXT_PUBLIC_AWS_IP}/${endpoint.replace(/^\//, '')}`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method: "POST",
       headers: {
         "X-API-Key": process.env.API_SECRET_KEY as string,
@@ -195,7 +210,7 @@ export async function fetchMargin() {
 export async function fetchTradeLogs() {
   const url = `${process.env.NEXT_PUBLIC_AWS_IP}/data/trades`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: { 'X-API-Key': process.env.API_SECRET_KEY as string },
       next: { revalidate: 10 }
     })

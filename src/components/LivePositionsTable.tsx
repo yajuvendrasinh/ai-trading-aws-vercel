@@ -28,33 +28,83 @@ export function LivePositionsTable({ initialPositions }: LivePositionsTableProps
     const wsUrl = `${wsBase}/ws/live-prices`
 
     let socket: WebSocket | null = null
+    let pollingInterval: NodeJS.Timeout
+
+    const startPolling = () => {
+      console.log("[LivePositions] 🔄 Falling back to Smart Polling.")
+      if (pollingInterval) clearInterval(pollingInterval)
+      pollingInterval = setInterval(async () => {
+        try {
+          const { fetchBreezeData } = await import("@/app/actions")
+          const data = await fetchBreezeData('/portfolio/positions')
+          if (data && data.Success) {
+            const list = Array.isArray(data.Success) ? data.Success : [data.Success]
+            setPositions(list.filter((p: any) => parseFloat(p.quantity || p.qty || '0') !== 0).map((p: any) => ({
+                symbol: p.stock_code || p.symbol || p.stockCode,
+                base_symbol: p.base_symbol || (p.stock_code || p.symbol || "").split(' ')[0],
+                qty: p.quantity || p.qty || p.position_qty,
+                price: p.last_traded_price || p.ltp || p.current_price,
+                segment: p.segment || p.instrument_type,
+                action: p.action || p.transaction_type,
+                average_price: p.average_price || p.avg_price || p.entry_price
+            })))
+          }
+        } catch (e) {
+          console.error("[LivePositions] Polling error:", e)
+        }
+      }, 7000) // Poll every 7s
+    }
 
     const connect = () => {
-      socket = new WebSocket(wsUrl)
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          if (message.type === "TICK") {
-            const { stock_code, price } = message
-            // Normalize incoming stock_code (e.g., CNXBAN -> BANKNIFTY) for frontend matching
-            const normalizedCode = stock_code === 'CNXBAN' ? 'BANKNIFTY' : stock_code;
-            
-            setPositions(prev => prev.map(p => {
-              const isMatch = p.symbol === normalizedCode || 
-                              p.base_symbol === normalizedCode ||
-                              p.symbol === stock_code ||
-                              p.base_symbol === stock_code ||
-                              (p.symbol && p.symbol.startsWith(normalizedCode));
-              return isMatch ? { ...p, price } : p;
-            }))
-          }
-        } catch (e) {}
+      // Mixed Content Detection
+      if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
+        console.warn("[LivePositions] ⚠️ WebSocket blocked by HTTPS. Using Polling fallback.")
+        startPolling()
+        return
       }
-      socket.onclose = () => setTimeout(connect, 3000)
+
+      try {
+        socket = new WebSocket(wsUrl)
+        socket.onopen = () => {
+          console.log("[LivePositions] ✅ Real-time price stream active.")
+          if (pollingInterval) clearInterval(pollingInterval)
+        }
+
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            if (message.type === "TICK") {
+              const { stock_code, price } = message
+              const normalizedCode = stock_code === 'CNXBAN' ? 'BANKNIFTY' : stock_code;
+              
+              setPositions(prev => prev.map(p => {
+                const isMatch = p.symbol === normalizedCode || 
+                                p.base_symbol === normalizedCode ||
+                                p.symbol === stock_code ||
+                                p.base_symbol === stock_code ||
+                                (p.symbol && p.symbol.startsWith(normalizedCode));
+                return isMatch ? { ...p, price } : p;
+              }))
+            }
+          } catch (e) {}
+        }
+        
+        socket.onclose = () => {
+          startPolling()
+          setTimeout(connect, 5000)
+        }
+        
+        socket.onerror = () => startPolling()
+      } catch (e) {
+        startPolling()
+      }
     }
 
     connect()
-    return () => socket?.close()
+    return () => {
+      socket?.close()
+      if (pollingInterval) clearInterval(pollingInterval)
+    }
   }, [])
 
   if (!positions || positions.length === 0) {
