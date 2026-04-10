@@ -56,9 +56,12 @@ export function LivePositionsTable({ initialPositions }: LivePositionsTableProps
     }
 
     const connect = () => {
-      // Mixed Content Detection
-      if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
-        console.warn("[LivePositions] ⚠️ WebSocket blocked by HTTPS. Using Polling fallback.")
+      // PROACTIVELY block insecure WebSocket on HTTPS to avoid console SecurityError
+      const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+      const isInsecureWs = wsUrl.startsWith('ws://')
+
+      if (isHttps && isInsecureWs) {
+        console.warn("[LivePositions] 🛡️ Secure Protocol: Switching to Smart Polling. (WebSocket requires WSS on HTTPS)")
         startPolling()
         return
       }

@@ -54,15 +54,18 @@ export function LiveHoldingsTable({ initialHoldings }: LiveHoldingsTableProps) {
     }
 
     const connect = () => {
-      // Logic for Mixed Content Detection
-      if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
-        console.warn("[LiveHoldings] ⚠️ Insecure WebSocket blocked by HTTPS protocol. Initiating fallback.")
+      // PROACTIVELY block insecure WebSocket on HTTPS to avoid console SecurityError
+      const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+      const isInsecureWs = wsUrl.startsWith('ws://')
+
+      if (isHttps && isInsecureWs) {
+        console.warn("[LiveHoldings] 🛡️ Secure Protocol: Switching to Smart Polling. (WebSocket requires WSS on HTTPS)")
         setStatus('disconnected')
         startPolling()
         return
       }
 
-      console.log(`[LiveDashboard] Connecting to WebSocket: ${wsUrl}`)
+      console.log(`[LiveDashboard] Attempting WebSocket: ${wsUrl}`)
       try {
         socket = new WebSocket(wsUrl)
         
