@@ -41,36 +41,71 @@ export function AgentBrain({ initialInsights }: AgentBrainProps) {
     const wsBase = rawBase.replace(/\/$/, '').replace(/^http/, 'ws')
     const wsUrl = `${wsBase}/ws/live-prices`
 
-    let socket: WebSocket | null = null
-    let reconnectTimeout: NodeJS.Timeout
-
     const connect = () => {
-      socket = new WebSocket(wsUrl)
-      
-      socket.onopen = () => setStatus('connected')
-      
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          if (message.type === "AGENT_INSIGHT") {
-            setInsights(prev => [message.data, ...prev].slice(0, 50))
-          }
-        } catch (err) {
-          console.error("AgentBrain WS Error:", err)
-        }
+      // PROACTIVELY block insecure WebSocket on HTTPS to avoid console SecurityError
+      const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+      const isInsecureWs = wsUrl.startsWith('ws://')
+
+      if (isHttps && isInsecureWs) {
+        console.warn("[AgentBrain] 🛡️ Secure Protocol: Switching to Smart Polling. (WebSocket requires WSS on HTTPS)")
+        startPolling()
+        return
       }
 
-      socket.onclose = () => {
-        setStatus('disconnected')
-        reconnectTimeout = setTimeout(connect, 5000)
+      try {
+        socket = new WebSocket(wsUrl)
+        
+        socket.onopen = () => setStatus('connected')
+        
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            if (message.type === "AGENT_INSIGHT") {
+              setInsights(prev => [message.data, ...prev].slice(0, 50))
+            }
+          } catch (err) {
+            console.error("AgentBrain WS Error:", err)
+          }
+        }
+
+        socket.onclose = () => {
+          setStatus('disconnected')
+          reconnectTimeout = setTimeout(connect, 5000)
+        }
+      } catch (err) {
+        console.error("[AgentBrain] WS Exception:", err)
+        startPolling()
       }
     }
 
-    connect()
+    const startPolling = () => {
+      const poll = async () => {
+        try {
+          const history = await fetchAgentInsights()
+          if (history && Array.isArray(history)) {
+            setInsights(history)
+          }
+        } catch (err) {
+          // Silent pool
+        }
+      }
+      poll()
+      const interval = setInterval(poll, 10000)
+      return interval
+    }
+
+    let pollIntervalId: NodeJS.Timeout | null = null
+    const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+    if (isHttps && wsUrl.startsWith('ws://')) {
+       pollIntervalId = startPolling()
+    } else {
+       connect()
+    }
 
     return () => {
       socket?.close()
       clearTimeout(reconnectTimeout)
+      if (pollIntervalId) clearInterval(pollIntervalId)
     }
   }, [])
 

@@ -68,47 +68,61 @@ export default function HoldingsPage() {
     let reconnectInterval: NodeJS.Timeout
 
     const connect = () => {
+      // PROACTIVELY block insecure WebSocket on HTTPS to avoid console SecurityError
+      const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+      const isInsecureWs = wsUrl.startsWith('ws://')
+
+      if (isHttps && isInsecureWs) {
+        console.warn("[HoldingsWS] 🛡️ Secure Protocol: Switching to Smart Polling. (WebSocket requires WSS on HTTPS)")
+        // The polling interval is already started in the first useEffect, 
+        // but we'll manually trigger one to ensure immediate data.
+        return
+      }
+
       console.log(`[HoldingsWS] Attempting connection to: ${wsUrl}`)
-      socket = new WebSocket(wsUrl)
+      try {
+        socket = new WebSocket(wsUrl)
 
-      socket.onopen = () => {
-        console.log("[HoldingsWS] ✅ Real-time connection established.")
-        setWsStatus('connected')
-      }
-      
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          if (message.type === "TICK") {
-            const { stock_code, price } = message
-            setHoldings(prev => prev.map(h => {
-              const symbol = (h.stock_code || h.symbol || h.stockCode || "").split('.')[0]
-              if (symbol === stock_code) {
-                // console.log(`[HoldingsWS] Updating ${symbol} to ${price}`)
-                return { ...h, current_market_price: price, ltp: price, lastPrice: price }
-              }
-              return h
-            }))
-          } else if (message.type === "INIT_PRICES") {
-            console.log("[HoldingsWS] 📊 Initial batch received.")
-            const initPrices = message.data
-            setHoldings(prev => prev.map(h => {
-              const symbol = (h.stock_code || h.symbol || h.stockCode || "").split('.')[0]
-              if (initPrices[symbol]) {
-                const price = initPrices[symbol]
-                return { ...h, current_market_price: price, ltp: price, lastPrice: price }
-              }
-              return h
-            }))
-          }
-        } catch (err) {
-          console.error("[HoldingsWS] Message error:", err)
+        socket.onopen = () => {
+          console.log("[HoldingsWS] ✅ Real-time connection established.")
+          setWsStatus('connected')
         }
-      }
+        
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            if (message.type === "TICK") {
+              const { stock_code, price } = message
+              setHoldings(prev => prev.map(h => {
+                const symbol = (h.stock_code || h.symbol || h.stockCode || "").split('.')[0]
+                if (symbol === stock_code) {
+                  return { ...h, current_market_price: price, ltp: price, lastPrice: price }
+                }
+                return h
+              }))
+            } else if (message.type === "INIT_PRICES") {
+              console.log("[HoldingsWS] 📊 Initial batch received.")
+              const initPrices = message.data
+              setHoldings(prev => prev.map(h => {
+                const symbol = (h.stock_code || h.symbol || h.stockCode || "").split('.')[0]
+                if (initPrices[symbol]) {
+                  const price = initPrices[symbol]
+                  return { ...h, current_market_price: price, ltp: price, lastPrice: price }
+                }
+                return h
+              }))
+            }
+          } catch (err) {
+            console.error("[HoldingsWS] Message error:", err)
+          }
+        }
 
-      socket.onclose = () => {
-        setWsStatus('disconnected')
-        reconnectInterval = setTimeout(connect, 3000)
+        socket.onclose = () => {
+          setWsStatus('disconnected')
+          reconnectInterval = setTimeout(connect, 3000)
+        }
+      } catch (err) {
+        console.error("[HoldingsWS] WS Exception:", err)
       }
     }
 
