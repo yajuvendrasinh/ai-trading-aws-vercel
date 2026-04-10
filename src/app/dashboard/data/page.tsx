@@ -154,7 +154,8 @@ export default function HistoricalDataPage() {
 
   const triggerManualDownload = () => {
     if (completedJobId) {
-      const downloadUrl = `${process.env.NEXT_PUBLIC_AWS_IP}/data/download/${completedJobId}`
+      // Use the secure internal proxy instead of the direct AWS link
+      const downloadUrl = `/api/download/${completedJobId}`
       window.location.href = downloadUrl
     }
   }

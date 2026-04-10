@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Play, Square, Zap, Loader2, AlertCircle, ShieldAlert } from "lucide-react"
-import { postTradingCommand, triggerKillSwitch } from "@/app/actions"
+import { postTradingCommand, triggerKillSwitch, fetchBreezeData } from "@/app/actions"
 
 interface AIControlPanelProps {
   initialStatus?: any
@@ -28,11 +28,8 @@ export function AIControlPanel({ initialStatus }: AIControlPanelProps) {
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_AWS_IP}/trading/status`, {
-            headers: { 'X-API-Key': process.env.NEXT_PUBLIC_API_SECRET_KEY || '' } 
-        })
-        if (res.ok) {
-          const data = await res.json()
+        const data = await fetchBreezeData('/trading/status')
+        if (data) {
           setStatus(data)
         }
       } catch (e) {
