@@ -40,6 +40,8 @@ export function AgentBrain({ initialInsights }: AgentBrainProps) {
     const rawBase = process.env.NEXT_PUBLIC_AWS_IP || "http://localhost:8000"
     const wsBase = rawBase.replace(/\/$/, '').replace(/^http/, 'ws')
     const wsUrl = `${wsBase}/ws/live-prices`
+    let socket: WebSocket | null = null
+    let reconnectTimeout: NodeJS.Timeout
 
     const connect = () => {
       // PROACTIVELY block insecure WebSocket on HTTPS to avoid console SecurityError
