@@ -113,6 +113,7 @@ export async function deepCheckSession(): Promise<{ active: boolean; reason: str
   }
 }
 
+export async function downloadHistoricalData(params: any) {
   const url = `${process.env.NEXT_PUBLIC_AWS_IP}/data/historical`;
   try {
     const res = await fetchWithTimeout(url, {
